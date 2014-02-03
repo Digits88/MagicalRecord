@@ -107,6 +107,17 @@ NSString * const kMagicalRecordPSCDidCompleteiCloudSetupNotification = @"kMagica
         }
         [MagicalRecord handleErrors:error];
     }
+    
+    //Protect file
+    NSDictionary *fileAttributes = [NSDictionary
+                                    dictionaryWithObject:NSFileProtectionCompleteUntilFirstUserAuthentication
+                                    forKey:NSFileProtectionKey];
+    [[NSFileManager defaultManager] setAttributes:fileAttributes
+                                     ofItemAtPath:[url path] error: &error];
+    if (error != nil) {
+        [MagicalRecord handleErrors:error];
+    }
+    
     return store;
 }
 
