@@ -91,6 +91,12 @@ NSString * const kMagicalRecordPSCDidCompleteiCloudSetupNotification = @"kMagica
                                                  URL:url
                                              options:options
                                                error:&error];
+            //Add NSFileProtectionCompleteUntilFirstUserAuthentication to the Core Data store file
+            NSDictionary *fileAttributes = [NSDictionary
+                                            dictionaryWithObject:NSFileProtectionCompleteUntilFirstUserAuthentication
+                                            forKey:NSFileProtectionKey];
+            [[NSFileManager defaultManager] setAttributes:fileAttributes
+                                             ofItemAtPath:[url path] error: &error];
             if (store)
             {
                 // If we successfully added a store, remove the error that was initially created
