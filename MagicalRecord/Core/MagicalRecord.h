@@ -5,6 +5,8 @@
 //  Copyright 2010 Magical Panda Software, LLC All rights reserved.
 //
 
+#import <Foundation/Foundation.h>
+
 #if TARGET_OS_IPHONE == 0
 #define MAC_PLATFORM_ONLY YES
 #endif
@@ -23,7 +25,7 @@
 #if MR_ENABLE_ACTIVE_RECORD_LOGGING != 0
       // First, check if we can use Cocoalumberjack for logging
     #ifdef LOG_VERBOSE
-        extern int ddLogLevel;
+        extern const int ddLogLevel;
         #define MRLog(...)  DDLogVerbose(__VA_ARGS__)
     #else
         #define MRLog(...) NSLog(@"%s(%p) %@", __PRETTY_FUNCTION__, self, [NSString stringWithFormat:__VA_ARGS__])

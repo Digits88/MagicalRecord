@@ -7,6 +7,7 @@
 //
 
 #import "NSNumber+MagicalDataImport.h"
+#import "CoreData+MagicalRecord.h"
 
 
 

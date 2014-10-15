@@ -7,6 +7,8 @@
 //
 
 #import <Foundation/Foundation.h>
+@class NSAttributeDescription;
+@class NSRelationshipDescription;
 
 @interface NSObject (MagicalRecord_DataImport)
 
