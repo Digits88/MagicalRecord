@@ -15,13 +15,6 @@
 
 @implementation NSManagedObjectHelperTests
 
-- (void)setUp
-{
-    [super setUp];
-
-    [MagicalRecord setupCoreDataStackWithInMemoryStore];
-}
-
 - (void)testCreateFetchRequestForEntity
 {
     NSFetchRequest *testRequest = [SingleRelatedEntity MR_requestAll];
@@ -99,12 +92,18 @@
 
 - (void)testRetrieveInstanceOfManagedObjectFromAnotherContextHasAPermanentObjectID
 {
-    NSManagedObject *insertedEntity = [SingleRelatedEntity MR_createEntity];
+    NSManagedObjectContext *defaultContext = [NSManagedObjectContext MR_defaultContext];
+    NSManagedObject *insertedEntity = [SingleRelatedEntity MR_createEntityInContext:defaultContext];
 
-    XCTAssertTrue([[insertedEntity objectID] isTemporaryID], @"Object ID should be temporary until saved");
+    XCTAssertTrue(insertedEntity.objectID.isTemporaryID, @"Object ID should be temporary until saved");
+
+    [defaultContext MR_saveToPersistentStoreAndWait];
+
+    XCTAssertFalse(insertedEntity.objectID.isTemporaryID, @"Object ID should be permanent after save");
 
     [MagicalRecord saveWithBlockAndWait:^(NSManagedObjectContext *localContext) {
         NSManagedObject *localEntity = [insertedEntity MR_inContext:localContext];
+        XCTAssertNotNil(localEntity, @"Object should not be nil");
         XCTAssertFalse([[localEntity objectID] isTemporaryID], @"Object ID should not be temporary after save");
     }];
 }
@@ -112,28 +111,29 @@
 - (void)testCanDeleteEntityInstanceInOtherContext
 {
     NSManagedObjectContext *defaultContext = [NSManagedObjectContext MR_defaultContext];
-    NSManagedObject *testEntity = [SingleRelatedEntity MR_createInContext:defaultContext];
 
-    [defaultContext MR_saveToPersistentStoreAndWait];
+    [defaultContext performBlockAndWait:^{
+        NSManagedObject *testEntity = [SingleRelatedEntity MR_createEntityInContext:defaultContext];
 
-    XCTAssertFalse([testEntity isDeleted], @"Entity should not be deleted at this point");
+        [defaultContext MR_saveToPersistentStoreAndWait];
 
-    [MagicalRecord saveWithBlockAndWait:^(NSManagedObjectContext *localContext) {
-        NSManagedObject *otherEntity = [testEntity MR_inContext:localContext];
+        XCTAssertFalse([testEntity isDeleted], @"Entity should not be deleted at this point");
 
-        XCTAssertNotNil(otherEntity, @"Entity should not be nil");
-        XCTAssertFalse([otherEntity isDeleted], @"Entity should not be deleted at this point");
+        [MagicalRecord saveWithBlockAndWait:^(NSManagedObjectContext *localContext) {
+            NSManagedObject *otherEntity = [testEntity MR_inContext:localContext];
 
-        // Delete the object in the other context
-        [testEntity MR_deleteInContext:localContext];
+            XCTAssertNotNil(otherEntity, @"Entity should not be nil");
+            XCTAssertFalse([otherEntity isDeleted], @"Entity should not be deleted at this point");
 
-        // The nested context entity should now be deleted
-        XCTAssertTrue([otherEntity isDeleted], @"Entity should now be deleted");
+            // Delete the object in the other context
+            [testEntity MR_deleteEntityInContext:localContext];
+            [localContext processPendingChanges];
+
+            // The nested context entity should now be deleted
+            XCTAssertTrue([localContext.deletedObjects containsObject:otherEntity], @"Entity should be listed as being deleted in the context");
+            XCTAssertTrue([otherEntity isDeleted], @"Entity should now be deleted");
+        }];
     }];
-
-    // The default context entity should now be deleted
-    XCTAssertNotNil(testEntity, @"Entity should not be nil");
-    XCTAssertTrue([testEntity isDeleted], @"Entity should now be deleted");
 }
 
 #pragma mark - Private Methods

@@ -3,21 +3,14 @@
 
 #import "_SingleEntityRelatedToMappedEntityWithSecondaryMappings.h"
 
-
 const struct SingleEntityRelatedToMappedEntityWithSecondaryMappingsAttributes SingleEntityRelatedToMappedEntityWithSecondaryMappingsAttributes = {
 	.secondaryMappedAttribute = @"secondaryMappedAttribute",
+    .notImportedAttribute = @"notImportedAttribute",
 };
-
-
 
 const struct SingleEntityRelatedToMappedEntityWithSecondaryMappingsRelationships SingleEntityRelatedToMappedEntityWithSecondaryMappingsRelationships = {
 	.mappedRelationship = @"mappedRelationship",
 };
-
-
-
-
-
 
 @implementation SingleEntityRelatedToMappedEntityWithSecondaryMappingsID
 @end
@@ -42,34 +35,25 @@ const struct SingleEntityRelatedToMappedEntityWithSecondaryMappingsRelationships
 	return (SingleEntityRelatedToMappedEntityWithSecondaryMappingsID*)[super objectID];
 }
 
-+ (NSSet*)keyPathsForValuesAffectingValueForKey:(NSString*)key {
-	NSSet *keyPaths = [super keyPathsForValuesAffectingValueForKey:key];
-	
+- (id)valueForUndefinedKey:(NSString *)key
+{
+    if ([key isEqualToString:@"secondaryMappedAttribute"])
+    {
+        return self.secondaryMappedAttribute;
+    }
+    else if ([key isEqualToString:@"notImportedAttribute"])
+    {
+        return self.notImportedAttribute;
+    }
 
-	return keyPaths;
+    return nil;
 }
-
-
-
 
 @dynamic secondaryMappedAttribute;
 
-
-
-
-
+@dynamic notImportedAttribute;
 
 @dynamic mappedRelationship;
 
-	
-
-
-
-
-
-
 @end
-
-
-
 

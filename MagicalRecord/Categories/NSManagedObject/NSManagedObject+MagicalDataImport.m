@@ -7,12 +7,12 @@
 
 #import "CoreData+MagicalRecord.h"
 #import "NSObject+MagicalDataImport.h"
+#import "MagicalRecordLogging.h"
 #import <objc/runtime.h>
-
-void MR_swapMethodsFromClass(Class c, SEL orig, SEL new);
 
 NSString * const kMagicalRecordImportCustomDateFormatKey            = @"dateFormat";
 NSString * const kMagicalRecordImportDefaultDateFormatString        = @"yyyy-MM-dd'T'HH:mm:ssz";
+NSString * const kMagicalRecordImportUnixTimeString                 = @"UnixTime";
 
 NSString * const kMagicalRecordImportAttributeKeyMapKey             = @"mappedKeyName";
 NSString * const kMagicalRecordImportAttributeValueClassNameKey     = @"attributeValueClassName";
@@ -23,18 +23,13 @@ NSString * const kMagicalRecordImportRelationshipTypeKey            = @"type";  
 
 NSString * const kMagicalRecordImportAttributeUseDefaultValueWhenNotPresent = @"useDefaultValueWhenNotPresent";
 
-@interface NSObject (MagicalRecord_DataImportControls)
-
-- (id) MR_valueForUndefinedKey:(NSString *)key;
-
-@end
-
 @implementation NSManagedObject (MagicalRecord_DataImport)
 
 - (BOOL) MR_importValue:(id)value forKey:(NSString *)key
 {
     NSString *selectorString = [NSString stringWithFormat:@"import%@:", [key MR_capitalizedFirstCharacterString]];
     SEL selector = NSSelectorFromString(selectorString);
+
     if ([self respondsToSelector:selector])
     {
         NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:[self methodSignatureForSelector:selector]];
@@ -42,9 +37,12 @@ NSString * const kMagicalRecordImportAttributeUseDefaultValueWhenNotPresent = @"
         [invocation setSelector:selector];
         [invocation setArgument:&value atIndex:2];
         [invocation invoke];
-//        [self performSelector:selector withObject:value];
-        return YES;
+
+        BOOL returnValue = YES;
+        [invocation getReturnValue:&returnValue];
+        return returnValue;
     }
+
     return NO;
 }
 
@@ -136,7 +134,7 @@ NSString * const kMagicalRecordImportAttributeUseDefaultValueWhenNotPresent = @"
         }
     }
 
-    NSString *addRelatedObjectToSetMessage = [NSString stringWithFormat:addRelationMessageFormat, attributeNameFromString([relationshipInfo name])];
+    NSString *addRelatedObjectToSetMessage = [NSString stringWithFormat:addRelationMessageFormat, MR_attributeNameFromString([relationshipInfo name])];
  
     SEL selector = NSSelectorFromString(addRelatedObjectToSetMessage);
 
@@ -149,56 +147,71 @@ NSString * const kMagicalRecordImportAttributeUseDefaultValueWhenNotPresent = @"
     }
     @catch (NSException *exception)
     {
-        MRLog(@"Adding object for relationship failed: %@\n", relationshipInfo);
-        MRLog(@"relatedObject.entity %@", [relatedObject entity]);
-        MRLog(@"relationshipInfo.destinationEntity %@", [relationshipInfo destinationEntity]);
-        MRLog(@"Add Relationship Selector: %@", addRelatedObjectToSetMessage);   
-        MRLog(@"perform selector error: %@", exception);
+        MRLogError(@"Adding object for relationship failed: %@\n", relationshipInfo);
+        MRLogError(@"relatedObject.entity %@", [relatedObject entity]);
+        MRLogError(@"relationshipInfo.destinationEntity %@", [relationshipInfo destinationEntity]);
+        MRLogError(@"Add Relationship Selector: %@", addRelatedObjectToSetMessage);   
+        MRLogError(@"perform selector error: %@", exception);
     }
 }
 
-- (void) MR_setRelationships:(NSDictionary *)relationships forKeysWithObject:(id)relationshipData withBlock:(void(^)(NSRelationshipDescription *,id))setRelationshipBlock
+- (void)MR_setRelationships:(NSDictionary *)relationships forKeysWithObject:(id)relationshipData withBlock:(void (^)(NSRelationshipDescription *, id))setRelationshipBlock
 {
-    for (NSString *relationshipName in relationships) 
+    for (NSString *relationshipName in relationships)
     {
-        if ([self MR_importValue:relationshipData forKey:relationshipName]) 
-        {
-            continue;
-        }
-        
-        NSRelationshipDescription *relationshipInfo = [relationships valueForKey:relationshipName];
-        
-        NSString *lookupKey = [[relationshipInfo userInfo] valueForKey:kMagicalRecordImportRelationshipMapKey] ?: relationshipName;
-        id relatedObjectData = [relationshipData valueForKeyPath:lookupKey];
-        
-        if (relatedObjectData == nil || [relatedObjectData isEqual:[NSNull null]]) 
-        {
-            continue;
-        }
-        
         SEL shouldImportSelector = NSSelectorFromString([NSString stringWithFormat:@"shouldImport%@:", [relationshipName MR_capitalizedFirstCharacterString]]);
         BOOL implementsShouldImport = (BOOL)[self respondsToSelector:shouldImportSelector];
-        void (^establishRelationship)(NSRelationshipDescription *, id) = ^(NSRelationshipDescription *blockInfo, id blockData)
+
+        NSRelationshipDescription *relationshipInfo = [relationships valueForKey:relationshipName];
+
+        NSString *lookupKey = [[relationshipInfo userInfo] valueForKey:kMagicalRecordImportRelationshipMapKey] ?: relationshipName;
+
+        id relatedObjectData;
+
+        @try
         {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-            if (!(implementsShouldImport && !(BOOL)[self performSelector:shouldImportSelector withObject:relatedObjectData]))
+            relatedObjectData = [relationshipData valueForKeyPath:lookupKey];
+        }
+        @catch (NSException *exception)
+        {
+            MRLogWarn(@"Looking up a key for relationship failed while importing: %@\n", relationshipInfo);
+            MRLogWarn(@"lookupKey: %@", lookupKey);
+            MRLogWarn(@"relationshipInfo.destinationEntity %@", [relationshipInfo destinationEntity]);
+            MRLogWarn(@"relationshipData: %@", relationshipData);
+            MRLogWarn(@"Exception:\n%@: %@", [exception name], [exception reason]);
+        }
+        @finally
+        {
+            if (relatedObjectData == nil || [relatedObjectData isEqual:[NSNull null]])
             {
-                setRelationshipBlock(blockInfo, blockData);
+                continue;
             }
+        }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored \
+    "-Warc-performSelector-leaks"
+        if (implementsShouldImport && !(BOOL)[self performSelector:shouldImportSelector withObject:relatedObjectData])
+        {
+            continue;
+        }
 #pragma clang diagnostic pop
-        };
-        
+        // Different values provided to the -shouldImport and -import methods??
+        if ([self MR_importValue:relationshipData forKey:relationshipName])
+        {
+            continue;
+        }
+
         if ([relationshipInfo isToMany] && [relatedObjectData isKindOfClass:[NSArray class]])
         {
-            for (id singleRelatedObjectData in relatedObjectData) 
+            for (id singleRelatedObjectData in relatedObjectData)
             {
-                establishRelationship(relationshipInfo, singleRelatedObjectData);
+                setRelationshipBlock(relationshipInfo, singleRelatedObjectData);
             }
         }
         else
         {
-            establishRelationship(relationshipInfo, relatedObjectData);
+            setRelationshipBlock(relationshipInfo, relatedObjectData);
         }
     }
 }
@@ -218,17 +231,17 @@ NSString * const kMagicalRecordImportAttributeUseDefaultValueWhenNotPresent = @"
     {
         [self willImport:objectData];
     }
-    MR_swapMethodsFromClass([objectData class], @selector(valueForUndefinedKey:), @selector(MR_valueForUndefinedKey:));
+
     return YES;
 }
 
 - (BOOL) MR_postImport:(id)objectData;
 {
-    MR_swapMethodsFromClass([objectData class], @selector(valueForUndefinedKey:), @selector(MR_valueForUndefinedKey:));
     if ([self respondsToSelector:@selector(didImport:)])
     {
         [self performSelector:@selector(didImport:) withObject:objectData];
     }
+
     return YES;
 }
 
@@ -263,12 +276,12 @@ NSString * const kMagicalRecordImportAttributeUseDefaultValueWhenNotPresent = @"
         
         if ((localObjectData) && (![localObjectData isKindOfClass:[NSDictionary class]]))
         {
-			NSString * relatedByAttribute = [[relationshipInfo userInfo] objectForKey:kMagicalRecordImportRelationshipLinkedByKey] ?: primaryKeyNameFromString([[relationshipInfo destinationEntity] name]);
+			NSString * relatedByAttribute = [[relationshipInfo userInfo] objectForKey:kMagicalRecordImportRelationshipLinkedByKey] ?: MR_primaryKeyNameFromString([[relationshipInfo destinationEntity] name]);
 			
             if (relatedByAttribute)
             {
 				
-                if (![weakself MR_importValue:localObjectData forKey:relatedByAttribute])
+                if (![relatedObject MR_importValue:localObjectData forKey:relatedByAttribute])
                 {
                     [relatedObject setValue:localObjectData forKey:relatedByAttribute];
                 }
@@ -282,14 +295,18 @@ NSString * const kMagicalRecordImportAttributeUseDefaultValueWhenNotPresent = @"
 
 + (id) MR_importFromObject:(id)objectData inContext:(NSManagedObjectContext *)context;
 {
-    NSAttributeDescription *primaryAttribute = [[self MR_entityDescription] MR_primaryAttributeToRelateBy];
+    NSAttributeDescription *primaryAttribute = [[self MR_entityDescriptionInContext:context] MR_primaryAttributeToRelateBy];
     
     id value = [objectData MR_valueForAttribute:primaryAttribute];
     
-    NSManagedObject *managedObject = [self MR_findFirstByAttribute:[primaryAttribute name] withValue:value inContext:context];
-    if (managedObject == nil) 
+    NSManagedObject *managedObject = nil;
+    if (primaryAttribute != nil)
     {
-        managedObject = [self MR_createInContext:context];
+        managedObject = [self MR_findFirstByAttribute:[primaryAttribute name] withValue:value inContext:context];
+    }
+    if (managedObject == nil)
+    {
+        managedObject = [self MR_createEntityInContext:context];
     }
 
     [managedObject MR_importValuesForKeysWithObject:objectData];
@@ -299,12 +316,18 @@ NSString * const kMagicalRecordImportAttributeUseDefaultValueWhenNotPresent = @"
 
 + (id) MR_importFromObject:(id)objectData
 {
-    return [self MR_importFromObject:objectData inContext:[NSManagedObjectContext MR_defaultContext]];
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return [self MR_importFromObject:objectData inContext:[NSManagedObjectContext MR_contextForCurrentThread]];
+#pragma clang diagnostic pop
 }
 
 + (NSArray *) MR_importFromArray:(NSArray *)listOfObjectData
 {
-    return [self MR_importFromArray:listOfObjectData inContext:[NSManagedObjectContext MR_defaultContext]];
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return [self MR_importFromArray:listOfObjectData inContext:[NSManagedObjectContext MR_contextForCurrentThread]];
+#pragma clang diagnostic pop
 }
 
 + (NSArray *) MR_importFromArray:(NSArray *)listOfObjectData inContext:(NSManagedObjectContext *)context
@@ -324,17 +347,3 @@ NSString * const kMagicalRecordImportAttributeUseDefaultValueWhenNotPresent = @"
 }
 
 @end
-
-void MR_swapMethodsFromClass(Class c, SEL orig, SEL new)
-{
-    Method origMethod = class_getInstanceMethod(c, orig);
-    Method newMethod = class_getInstanceMethod(c, new);
-    if (class_addMethod(c, orig, method_getImplementation(newMethod), method_getTypeEncoding(newMethod)))
-    {
-        class_replaceMethod(c, new, method_getImplementation(origMethod), method_getTypeEncoding(origMethod));
-    }
-    else
-    {
-        method_exchangeImplementations(origMethod, newMethod);
-    }
-}

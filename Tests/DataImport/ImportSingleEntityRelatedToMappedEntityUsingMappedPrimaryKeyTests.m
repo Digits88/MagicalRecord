@@ -20,9 +20,9 @@
 {
     NSManagedObjectContext *context = [NSManagedObjectContext MR_defaultContext];
 
-    MappedEntity *testMappedEntity = [MappedEntity MR_createInContext:context];
+    MappedEntity *testMappedEntity = [MappedEntity MR_createEntityInContext:context];
 
-    testMappedEntity.testMappedEntityIDValue = 42;
+    testMappedEntity.testMappedEntityID = @42;
     testMappedEntity.sampleAttribute = @"This attribute created as part of the test case setup";
 
     [context MR_saveToPersistentStoreAndWait];
